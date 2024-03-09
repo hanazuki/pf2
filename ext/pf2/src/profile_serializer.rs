@@ -5,7 +5,7 @@ use std::hash::Hasher;
 use rb_sys::*;
 
 use crate::backtrace::Backtrace;
-use crate::profile::Profile;
+use crate::profile_recorder::ProfileRecorder;
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ProfileSerializer {
@@ -78,7 +78,7 @@ struct ProfileSample {
 }
 
 impl ProfileSerializer {
-    pub fn serialize(profile: &Profile) -> String {
+    pub fn serialize(profile_recorder: &ProfileRecorder) -> String {
         let mut sequence = 1;
 
         let mut serializer = ProfileSerializer {
@@ -87,7 +87,7 @@ impl ProfileSerializer {
 
         unsafe {
             // Process each sample
-            for sample in profile.samples.iter() {
+            for sample in profile_recorder.profile.samples.iter() {
                 let mut merged_stack: Vec<FrameTableEntry> = vec![];
 
                 // Process C-level stack
@@ -99,7 +99,7 @@ impl ProfileSerializer {
                 for i in 0..sample.c_backtrace_pcs[0] {
                     let pc = sample.c_backtrace_pcs[i + 1];
                     Backtrace::backtrace_syminfo(
-                        &profile.backtrace_state,
+                        &profile_recorder.backtrace_state,
                         pc,
                         |_pc: usize, symname: *const c_char, _symval: usize, _symsize: usize| {
                             if symname.is_null() {
@@ -177,7 +177,9 @@ impl ProfileSerializer {
 
                     if merged_stack.is_empty() {
                         // This is the leaf node, record a Sample
-                        let elapsed_ns = (sample.timestamp - profile.start_timestamp).as_nanos();
+                        let elapsed_ns = (sample.timestamp
+                            - profile_recorder.profile.start_timestamp)
+                            .as_nanos();
                         thread_serializer.samples.push(ProfileSample {
                             elapsed_ns,
                             stack_tree_id: stack_tree.node_id,

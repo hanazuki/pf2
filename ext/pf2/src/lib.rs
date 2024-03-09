@@ -6,6 +6,7 @@ mod ruby_init;
 
 mod backtrace;
 mod profile;
+mod profile_recorder;
 mod profile_serializer;
 mod ringbuffer;
 mod sample;

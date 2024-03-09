@@ -8,10 +8,10 @@ use std::{collections::HashSet, sync::Arc};
 
 use rb_sys::*;
 
+use crate::profile_recorder::ProfileRecorder;
 use crate::signal_scheduler::SignalHandlerArgs;
 
 use super::configuration::Configuration;
-use crate::profile::Profile;
 
 // We could avoid deferring the timer creation by combining pthread_getcpuclockid(3) and timer_create(2) here,
 // but we're not doing so since (1) Ruby does not expose the pthread_self() of a Ruby Thread
@@ -25,7 +25,7 @@ struct Internal {
     configuration: Configuration,
     registered_pthread_ids: HashSet<libc::pthread_t>,
     kernel_thread_id_to_ruby_thread_map: HashMap<libc::pid_t, VALUE>,
-    profile: Arc<RwLock<Profile>>,
+    profile_recorder: Arc<RwLock<ProfileRecorder>>,
 }
 
 impl TimerInstaller {
@@ -33,14 +33,14 @@ impl TimerInstaller {
     // The callback should create a timer for the thread.
     pub fn install_timer_to_ruby_threads(
         configuration: Configuration,
-        profile: Arc<RwLock<Profile>>,
+        profile_recorder: Arc<RwLock<ProfileRecorder>>,
     ) {
         let registrar = Self {
             internal: Box::new(Mutex::new(Internal {
                 configuration: configuration.clone(),
                 registered_pthread_ids: HashSet::new(),
                 kernel_thread_id_to_ruby_thread_map: HashMap::new(),
-                profile,
+                profile_recorder,
             })),
         };
 
@@ -110,7 +110,7 @@ impl TimerInstaller {
 
         Self::register_timer_to_current_thread(
             &internal.configuration,
-            &internal.profile,
+            &internal.profile_recorder,
             &internal.kernel_thread_id_to_ruby_thread_map,
         );
 
@@ -138,7 +138,7 @@ impl TimerInstaller {
     // Creates a new POSIX timer which invocates sampling for the thread that called this function.
     fn register_timer_to_current_thread(
         configuration: &Configuration,
-        profile: &Arc<RwLock<Profile>>,
+        profile_recorder: &Arc<RwLock<ProfileRecorder>>,
         kernel_thread_id_to_ruby_thread_map: &HashMap<libc::pid_t, VALUE>,
     ) {
         let current_pthread_id = unsafe { libc::pthread_self() };
@@ -150,7 +150,7 @@ impl TimerInstaller {
 
         // NOTE: This Box is never dropped
         let signal_handler_args = Box::new(SignalHandlerArgs {
-            profile: Arc::clone(profile),
+            profile_recorder: Arc::clone(profile_recorder),
             context_ruby_thread,
         });
 

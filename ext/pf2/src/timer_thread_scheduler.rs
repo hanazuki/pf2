@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use rb_sys::*;
 
-use crate::profile::Profile;
+use crate::profile_recorder::ProfileRecorder;
 use crate::profile_serializer::ProfileSerializer;
 use crate::sample::Sample;
 use crate::util::*;
@@ -19,14 +19,14 @@ use crate::util::*;
 pub struct TimerThreadScheduler {
     ruby_threads: Arc<RwLock<Vec<VALUE>>>,
     interval: Option<Arc<Duration>>,
-    profile: Option<Arc<RwLock<Profile>>>,
+    profile_recorder: Option<Arc<RwLock<ProfileRecorder>>>,
     stop_requested: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
 struct PostponedJobArgs {
     ruby_threads: Arc<RwLock<Vec<VALUE>>>,
-    profile: Arc<RwLock<Profile>>,
+    profile_recorder: Arc<RwLock<ProfileRecorder>>,
 }
 
 impl TimerThreadScheduler {
@@ -34,7 +34,7 @@ impl TimerThreadScheduler {
         TimerThreadScheduler {
             ruby_threads: Arc::new(RwLock::new(vec![])),
             interval: None,
-            profile: None,
+            profile_recorder: None,
             stop_requested: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -110,15 +110,15 @@ impl TimerThreadScheduler {
 
     fn start(&mut self, _rbself: VALUE) -> VALUE {
         // Create Profile
-        let profile = Arc::new(RwLock::new(Profile::new()));
-        self.start_profile_buffer_flusher_thread(&profile);
+        let profile_recorder = Arc::new(RwLock::new(ProfileRecorder::new()));
+        self.start_profile_buffer_flusher_thread(&profile_recorder);
 
         // Start monitoring thread
         let stop_requested = Arc::clone(&self.stop_requested);
         let interval = Arc::clone(self.interval.as_ref().unwrap());
         let postponed_job_args: Box<PostponedJobArgs> = Box::new(PostponedJobArgs {
             ruby_threads: Arc::clone(&self.ruby_threads),
-            profile: Arc::clone(&profile),
+            profile_recorder: Arc::clone(&profile_recorder),
         });
         let postponed_job_handle: rb_postponed_job_handle_t = unsafe {
             rb_postponed_job_preregister(
@@ -131,7 +131,7 @@ impl TimerThreadScheduler {
             Self::thread_main_loop(stop_requested, interval, postponed_job_handle)
         });
 
-        self.profile = Some(profile);
+        self.profile_recorder = Some(profile_recorder);
 
         Qtrue.into()
     }
@@ -157,11 +157,11 @@ impl TimerThreadScheduler {
         // Stop the collector thread
         self.stop_requested.store(true, Ordering::Relaxed);
 
-        if let Some(profile) = &self.profile {
+        if let Some(profile_recorder) = &self.profile_recorder {
             // Finalize
-            match profile.try_write() {
-                Ok(mut profile) => {
-                    profile.flush_temporary_sample_buffer();
+            match profile_recorder.try_write() {
+                Ok(mut profile_recorder) => {
+                    profile_recorder.flush_temporary_sample_buffer();
                 }
                 Err(_) => {
                     println!("[pf2 ERROR] stop: Failed to acquire profile lock.");
@@ -169,10 +169,13 @@ impl TimerThreadScheduler {
                 }
             }
 
-            let profile = profile.try_read().unwrap();
-            log::debug!("Number of samples: {}", profile.samples.len());
+            let profile_recorder = profile_recorder.try_read().unwrap();
+            log::debug!(
+                "Number of samples: {}",
+                profile_recorder.profile.samples.len()
+            );
 
-            let serialized = ProfileSerializer::serialize(&profile);
+            let serialized = ProfileSerializer::serialize(&profile_recorder);
             let serialized = CString::new(serialized).unwrap();
             unsafe { rb_str_new_cstr(serialized.as_ptr()) }
         } else {
@@ -186,8 +189,8 @@ impl TimerThreadScheduler {
         }
         let args = unsafe { ManuallyDrop::new(Box::from_raw(ptr as *mut PostponedJobArgs)) };
 
-        let mut profile = match args.profile.try_write() {
-            Ok(profile) => profile,
+        let mut profile_recorder = match args.profile_recorder.try_write() {
+            Ok(profile_recorder) => profile_recorder,
             Err(_) => {
                 // FIXME: Do we want to properly collect GC samples? I don't know yet.
                 log::trace!("Failed to acquire profile lock (garbage collection possibly in progress). Dropping sample.");
@@ -203,8 +206,12 @@ impl TimerThreadScheduler {
                 continue;
             }
 
-            let sample = Sample::capture(*ruby_thread, &profile.backtrace_state);
-            if profile.temporary_sample_buffer.push(sample).is_err() {
+            let sample = Sample::capture(*ruby_thread, &profile_recorder.backtrace_state);
+            if profile_recorder
+                .temporary_sample_buffer
+                .push(sample)
+                .is_err()
+            {
                 log::debug!("Temporary sample buffer full. Dropping sample.");
             }
         }
@@ -213,13 +220,13 @@ impl TimerThreadScheduler {
         }
     }
 
-    fn start_profile_buffer_flusher_thread(&self, profile: &Arc<RwLock<Profile>>) {
-        let profile = Arc::clone(profile);
+    fn start_profile_buffer_flusher_thread(&self, profile_recorder: &Arc<RwLock<ProfileRecorder>>) {
+        let profile_recorder = Arc::clone(profile_recorder);
         thread::spawn(move || loop {
             log::trace!("Flushing temporary sample buffer");
-            match profile.try_write() {
-                Ok(mut profile) => {
-                    profile.flush_temporary_sample_buffer();
+            match profile_recorder.try_write() {
+                Ok(mut profile_recorder) => {
+                    profile_recorder.flush_temporary_sample_buffer();
                 }
                 Err(_) => {
                     log::debug!("flusher: Failed to acquire profile lock");
@@ -281,10 +288,10 @@ impl TimerThreadScheduler {
     unsafe extern "C" fn dmark(ptr: *mut c_void) {
         unsafe {
             let collector = ManuallyDrop::new(Box::from_raw(ptr as *mut TimerThreadScheduler));
-            if let Some(profile) = &collector.profile {
-                match profile.read() {
-                    Ok(profile) => {
-                        profile.dmark();
+            if let Some(profile_recorder) = &collector.profile_recorder {
+                match profile_recorder.read() {
+                    Ok(profile_recorder) => {
+                        profile_recorder.dmark();
                     }
                     Err(_) => {
                         panic!("[pf2 FATAL] dmark: Failed to acquire profile lock.");
