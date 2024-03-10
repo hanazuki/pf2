@@ -18,24 +18,33 @@ pub struct Sample {
 }
 
 impl Sample {
-    // Nearly async-signal-safe
-    // (rb_profile_thread_frames isn't defined as a-s-s)
-    pub fn capture(ruby_thread: VALUE, backtrace_state: &BacktraceState) -> Self {
+    /// Captures the stack trace of a Ruby Thread.
+    /// The native stack trace is captured as well if `backtrace_state` is provided.
+    ///
+    /// # Notes
+    ///
+    /// This functions is NOT strictly async-signal-safe as it calls
+    /// rb_profile_thread_frames(), which is not async-signal-safe. However, it
+    /// seems to work in practice.
+    pub fn capture(ruby_thread: VALUE, backtrace_state: Option<&BacktraceState>) -> Self {
+        // Capture the native stack trace
+        // c_backtrace_pcs[0] = Depth of native backtrace
         let mut c_backtrace_pcs = [0; MAX_C_STACK_DEPTH + 1];
-
-        Backtrace::backtrace_simple(
-            backtrace_state,
-            0,
-            |pc: usize| -> i32 {
-                if c_backtrace_pcs[0] >= MAX_C_STACK_DEPTH {
-                    return 1;
-                }
-                c_backtrace_pcs[0] += 1;
-                c_backtrace_pcs[c_backtrace_pcs[0]] = pc;
-                0
-            },
-            Some(Backtrace::backtrace_error_callback),
-        );
+        if let Some(backtrace_state) = backtrace_state {
+            Backtrace::backtrace_simple(
+                backtrace_state,
+                0,
+                |pc: usize| -> i32 {
+                    if c_backtrace_pcs[0] >= MAX_C_STACK_DEPTH {
+                        return 1;
+                    }
+                    c_backtrace_pcs[0] += 1;
+                    c_backtrace_pcs[c_backtrace_pcs[0]] = pc;
+                    0
+                },
+                Some(Backtrace::backtrace_error_callback),
+            );
+        }
 
         let mut sample = Sample {
             ruby_thread,
@@ -45,6 +54,8 @@ impl Sample {
             linenos: [0; MAX_STACK_DEPTH],
             c_backtrace_pcs,
         };
+
+        // Capture the Ruby stack trace
         unsafe {
             sample.line_count = rb_profile_thread_frames(
                 ruby_thread,

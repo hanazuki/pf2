@@ -10,6 +10,7 @@ pub struct Configuration {
     pub time_mode: TimeMode,
     pub target_ruby_threads: HashSet<VALUE>,
     pub track_new_threads: bool,
+    pub record_native_frames: bool,
 }
 
 #[derive(Clone, Debug)]

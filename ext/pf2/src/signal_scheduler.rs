@@ -48,7 +48,7 @@ impl SignalScheduler {
         unsafe {
             rb_scan_args(argc, argv, cstr!(":"), &kwargs);
         };
-        let mut kwargs_values: [VALUE; 4] = [Qnil.into(); 4];
+        let mut kwargs_values: [VALUE; 5] = [Qnil.into(); 5];
         unsafe {
             rb_get_kwargs(
                 kwargs,
@@ -57,10 +57,11 @@ impl SignalScheduler {
                     rb_intern(cstr!("threads")),
                     rb_intern(cstr!("time_mode")),
                     rb_intern(cstr!("track_new_threads")),
+                    rb_intern(cstr!("record_native_frames")),
                 ]
                 .as_mut_ptr(),
                 0,
-                4,
+                5,
                 kwargs_values.as_mut_ptr(),
             );
         };
@@ -104,6 +105,11 @@ impl SignalScheduler {
         } else {
             false
         };
+        let record_native_frames: bool = if kwargs_values[4] != Qundef as VALUE {
+            RTEST(kwargs_values[4])
+        } else {
+            false
+        };
 
         let mut target_ruby_threads = HashSet::new();
         unsafe {
@@ -118,13 +124,20 @@ impl SignalScheduler {
             target_ruby_threads,
             time_mode,
             track_new_threads,
+            record_native_frames,
         });
 
         Qnil.into()
     }
 
     fn start(&mut self, _rbself: VALUE) -> VALUE {
-        let profile_recorder = Arc::new(RwLock::new(ProfileRecorder::new()));
+        let profile_recorder = Arc::new(RwLock::new(ProfileRecorder::new(
+            self.configuration
+                .as_ref()
+                .unwrap()
+                .clone()
+                .record_native_frames,
+        )));
         self.start_profile_buffer_flusher_thread(&profile_recorder);
         self.install_signal_handler();
 
@@ -199,7 +212,10 @@ impl SignalScheduler {
             }
         };
 
-        let sample = Sample::capture(args.context_ruby_thread, &profile_recorder.backtrace_state); // NOT async-signal-safe
+        let sample = Sample::capture(
+            args.context_ruby_thread,
+            profile_recorder.backtrace_state.as_ref(),
+        ); // NOT async-signal-safe
         if profile_recorder
             .temporary_sample_buffer
             .push(sample)

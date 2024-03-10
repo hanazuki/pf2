@@ -17,25 +17,29 @@ const DEFAULT_RINGBUFFER_CAPACITY: usize = 320;
 pub struct ProfileRecorder {
     pub profile: Profile,
     pub temporary_sample_buffer: Ringbuffer,
-    pub backtrace_state: BacktraceState,
+    pub backtrace_state: Option<BacktraceState>,
     known_values: HashSet<VALUE>,
 }
 
 impl ProfileRecorder {
-    pub fn new() -> Self {
+    pub fn new(record_native_frames: bool) -> Self {
         let profile = Profile {
             start_timestamp: Instant::now(),
             samples: vec![],
         };
 
-        let backtrace_state = unsafe {
-            let ptr = backtrace_create_state(
-                null_mut(),
-                1,
-                Some(Backtrace::backtrace_error_callback),
-                null_mut(),
-            );
-            BacktraceState::new(ptr)
+        let backtrace_state = if record_native_frames {
+            unsafe {
+                let ptr = backtrace_create_state(
+                    null_mut(),
+                    1,
+                    Some(Backtrace::backtrace_error_callback),
+                    null_mut(),
+                );
+                Some(BacktraceState::new(ptr))
+            }
+        } else {
+            None
         };
 
         Self {

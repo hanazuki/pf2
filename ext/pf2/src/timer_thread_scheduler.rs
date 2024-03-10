@@ -21,6 +21,7 @@ pub struct TimerThreadScheduler {
     interval: Option<Arc<Duration>>,
     profile_recorder: Option<Arc<RwLock<ProfileRecorder>>>,
     stop_requested: Arc<AtomicBool>,
+    record_native_frames: bool,
 }
 
 #[derive(Debug)]
@@ -36,6 +37,7 @@ impl TimerThreadScheduler {
             interval: None,
             profile_recorder: None,
             stop_requested: Arc::new(AtomicBool::new(false)),
+            record_native_frames: false,
         }
     }
 
@@ -45,7 +47,7 @@ impl TimerThreadScheduler {
         unsafe {
             rb_scan_args(argc, argv, cstr!(":"), &kwargs);
         };
-        let mut kwargs_values: [VALUE; 3] = [Qnil.into(); 3];
+        let mut kwargs_values: [VALUE; 4] = [Qnil.into(); 4];
         unsafe {
             rb_get_kwargs(
                 kwargs,
@@ -53,10 +55,11 @@ impl TimerThreadScheduler {
                     rb_intern(cstr!("interval_ms")),
                     rb_intern(cstr!("threads")),
                     rb_intern(cstr!("time_mode")),
+                    rb_intern(cstr!("record_native_frames")),
                 ]
                 .as_mut_ptr(),
                 0,
-                3,
+                4,
                 kwargs_values.as_mut_ptr(),
             );
         };
@@ -93,6 +96,11 @@ impl TimerThreadScheduler {
                 }
             }
         }
+        let record_native_frames: bool = if kwargs_values[3] != Qundef as VALUE {
+            RTEST(kwargs_values[3])
+        } else {
+            false
+        };
 
         let mut target_ruby_threads = Vec::new();
         unsafe {
@@ -104,13 +112,15 @@ impl TimerThreadScheduler {
 
         self.interval = Some(Arc::new(interval));
         self.ruby_threads = Arc::new(RwLock::new(target_ruby_threads.into_iter().collect()));
+        self.record_native_frames = record_native_frames;
 
         Qnil.into()
     }
 
     fn start(&mut self, _rbself: VALUE) -> VALUE {
         // Create Profile
-        let profile_recorder = Arc::new(RwLock::new(ProfileRecorder::new()));
+        let profile_recorder =
+            Arc::new(RwLock::new(ProfileRecorder::new(self.record_native_frames)));
         self.start_profile_buffer_flusher_thread(&profile_recorder);
 
         // Start monitoring thread
@@ -206,7 +216,7 @@ impl TimerThreadScheduler {
                 continue;
             }
 
-            let sample = Sample::capture(*ruby_thread, &profile_recorder.backtrace_state);
+            let sample = Sample::capture(*ruby_thread, profile_recorder.backtrace_state.as_ref());
             if profile_recorder
                 .temporary_sample_buffer
                 .push(sample)
