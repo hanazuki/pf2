@@ -3,6 +3,7 @@
 #include <string.h>
 #include <stdatomic.h>
 
+#include RUBY_EXTCONF_H
 #include <ruby.h>
 #include <ruby/debug.h>
 
@@ -12,6 +13,15 @@
 #include "serializer.h"
 #include "session.h"
 #include "sample.h"
+
+static uintptr_t
+cfunc_addr(VALUE frame) {
+  unsigned char const *cme = (void const *)frame;
+  unsigned char const *md = *(void const* const*)(cme + OFFSET_rb_callable_method_entry_t_def);
+  int type = *(int const *)(md + OFFSET_rb_method_definition_t_type) & 0xF;  // FIXME: bitfield
+  if(type != VM_METHOD_TYPE_CFUNC) return 0;
+  return (uintptr_t)*(void const* const*)(md + OFFSET_rb_method_definition_t_body_cfunc_func);
+}
 
 static struct pf2_ser_function extract_function_from_ruby_frame(VALUE frame);
 static struct pf2_ser_function extract_function_from_native_pc(uintptr_t pc);
@@ -293,7 +303,7 @@ pf2_ser_to_ruby_hash(struct pf2_ser *serializer) {
             ID2SYM(rb_intern("start_lineno")),
             function->start_lineno >= 0 ? INT2NUM(function->start_lineno) : Qnil
         );
-        rb_hash_aset(function_hash, ID2SYM(rb_intern("start_address")), Qnil); // TODO: C functions
+        rb_hash_aset(function_hash, ID2SYM(rb_intern("start_address")), function->start_address ? SIZET2NUM(function->start_address) : Qnil); // TODO: C functions
 
         rb_ary_push(functions, function_hash);
     }
@@ -330,7 +340,7 @@ extract_function_from_ruby_frame(VALUE frame) {
     }
 
     func.implementation = IMPLEMENTATION_RUBY;
-    func.start_address = 0; // For C functions
+    func.start_address = cfunc_addr(frame); // For C functions
 
     return func;
 }

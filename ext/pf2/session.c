@@ -8,6 +8,7 @@
 #include <sys/time.h>
 #include <time.h>
 
+#include RUBY_EXTCONF_H
 #include <ruby.h>
 #include <ruby/debug.h>
 
