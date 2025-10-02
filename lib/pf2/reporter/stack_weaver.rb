@@ -32,9 +32,21 @@ module Pf2
             end
 
             location_index = ruby_stack.pop
+            if should_switch_to_native?(location_index, native_stack.dup)
+              # Insert vm_call_cfunc_with_frame under CFUNC frame
+              while native_location_index = native_stack.last
+                function = @profile[:functions][@profile[:locations][native_location_index][:function_index]]
+                if function[:name]&.match?(/\A(?:vm_call_cfunc_with_frame_?|vm_sendish)(?:\.|\z)/)
+                  weaved_stack.unshift(native_stack.pop)
+                else
+                  break
+                end
+              end
+
+              current_stack = :native
+            end
             weaved_stack.unshift(location_index)
 
-            current_stack = :native if should_switch_to_native?(location_index, native_stack.dup)
 
           when :native
             if native_stack.size == 0 # We've reached the end of the native stack
