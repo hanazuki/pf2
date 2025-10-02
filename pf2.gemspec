@@ -34,6 +34,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'rake-compiler'
   spec.add_dependency 'mini_portile2'
   spec.add_dependency 'webrick'
+  spec.add_dependency 'logger'
 
   spec.add_development_dependency 'irb'
   spec.add_development_dependency 'minitest'
