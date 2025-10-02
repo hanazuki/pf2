@@ -5,6 +5,7 @@
 #include <stdatomic.h>
 #include <sys/time.h>
 
+#include RUBY_EXTCONF_H
 #include <ruby.h>
 
 #include "configuration.h"
