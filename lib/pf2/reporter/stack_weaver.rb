@@ -62,6 +62,8 @@ module Pf2
         # Is the current Ruby function a cfunc?
         return false if function[:start_address] == nil
 
+        return true  # FIXME: the corresponding native frame may be optimized away (e.g. tail optimization)
+
         # Does a corresponding native function exist in the remainder of the native stack?
         loop do
           break if native_stack_remainder.size == 0
