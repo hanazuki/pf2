@@ -150,6 +150,12 @@ sample_collector_thread(void *arg)
     struct pf2_session *session = arg;
 
     while (session->is_running == true) {
+        int err;
+        if ((err = pthread_rwlock_trywrlock(&session->samples_lock)) != 0) {
+            if (err != EBUSY) abort();
+            goto sleep;
+        }
+
         // Take samples from the ring buffer
         struct pf2_sample sample;
         while (pf2_ringbuffer_pop(session->rbuf, &sample) == true) {
@@ -163,6 +169,11 @@ sample_collector_thread(void *arg)
             session->samples[session->samples_index++] = sample;
         }
 
+        if (pthread_rwlock_unlock(&session->samples_lock) != 0) {
+            abort();
+        }
+
+    sleep:
         // Sleep for 100 ms
         // TODO: Replace with high watermark callback
         struct timespec ts = { .tv_sec = 0, .tv_nsec = 10 * 1000000, }; // 10 ms
@@ -331,6 +342,7 @@ pf2_session_alloc(VALUE self)
     if (session->samples == NULL) {
         rb_raise(rb_eNoMemError, "Failed to allocate memory");
     }
+    pthread_rwlock_init(&session->samples_lock, 0);
 
     session->configuration = NULL;
 
@@ -359,12 +371,18 @@ pf2_session_dmark(void *sess)
         head = (head + 1) % rbuf->size;
     }
 
+    if (pthread_rwlock_rdlock(&session->samples_lock) != 0) {
+        abort();
+    }
     // Iterate over all samples in the samples array and mark them
     for (size_t i = 0; i < session->samples_index; i++) {
         sample = &session->samples[i];
         for (int i = 0; i < sample->depth; i++) {
             rb_gc_mark(sample->cmes[i]);
         }
+    }
+    if (pthread_rwlock_unlock(&session->samples_lock) != 0) {
+        abort();
     }
 
     // Allow sample collection
@@ -380,6 +398,7 @@ pf2_session_dfree(void *sess)
     pf2_ringbuffer_free(session->rbuf);
     free(session->samples);
     free(session->collector_thread);
+    pthread_rwlock_destroy(&session->samples_lock);
     free(session);
 }
 

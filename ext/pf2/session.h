@@ -26,6 +26,7 @@ struct pf2_session {
     struct pf2_sample *samples; // Dynamic array of samples
     size_t samples_index;
     size_t samples_capacity;    // Current capacity of the samples array
+    pthread_rwlock_t samples_lock;
 
     struct timespec start_time_realtime;
     struct timespec start_time; // When profiling started

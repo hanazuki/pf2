@@ -87,6 +87,11 @@ pf2_ser_prepare(struct pf2_ser *serializer, struct pf2_session *session) {
         (uint64_t)session->start_time_realtime.tv_nsec;
     serializer->duration_ns = session->duration_ns;
 
+    int err;
+    if ((err = pthread_rwlock_rdlock(&session->samples_lock)) != 0) {
+        rb_syserr_fail(err, "pthread_rwlock_rdlock(&session->samples_lock)");
+    }
+
     // Process samples
     for (size_t i = 0; i < session->samples_index; i++) {
         struct pf2_sample *sample = &session->samples[i];
@@ -128,6 +133,11 @@ pf2_ser_prepare(struct pf2_ser *serializer, struct pf2_session *session) {
         }
 
     }
+
+    if ((err = pthread_rwlock_unlock(&session->samples_lock)) != 0) {
+        rb_syserr_fail(err, "pthread_rwlock_unlock(&session->samples_lock)");
+    }
+
 }
 
 VALUE
