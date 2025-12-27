@@ -3,6 +3,9 @@ Pf2
 
 A experimental sampling-based profiler for Ruby 3.3+.
 
+- GitHub: https://github.com/osyoyu/pf2
+- Documentation: https://osyoyu.github.io/pf2/
+
 Notable Capabilites
 --------
 
@@ -12,6 +15,25 @@ Notable Capabilites
 
 Usage
 --------
+
+### Installation
+
+You will need a C compiler to build the native extension.
+
+Add this line to your application's Gemfile:
+
+```ruby
+gem 'pf2'
+
+# When using the main branch, specify submodules: true
+gem 'pf2', git: 'https://github.com/osyoyu/pf2.git', submodules: true
+```
+
+Pf2 can be installed as a standalone CLI tool as well.
+
+```console
+gem install pf2
+```
 
 ### Quickstart
 
